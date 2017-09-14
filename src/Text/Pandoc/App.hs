@@ -179,7 +179,7 @@ pdfWriterAndProg mWriter mEngine = do
 
 
 convertWithOpts :: Opt -> IO ()
-convertWithOpts = convertWithOpts' defaultAPIOpts
+convertWithOpts = void . convertWithOpts' defaultAPIOpts
 
 -- | Some options can be passed to the conversion using the pandoc API.
 -- One example would be a filter function written in haskell.
@@ -196,7 +196,7 @@ defaultAPIOpts = APIOpt
 instance Show APIOpt where
     show = const "API Opts"
 
-convertWithOpts' :: APIOpt -> Opt -> IO ()
+convertWithOpts' :: APIOpt -> Opt -> IO Pandoc
 convertWithOpts' apiopts opts = do
   let args = optInputFiles opts
   let outputFile = fromMaybe "-" (optOutputFile opts)
@@ -575,6 +575,7 @@ convertWithOpts' apiopts opts = do
                      then T.pack <$> makeSelfContained writerOptions
                           (T.unpack output)
                      else return output
+    pure doc
 
 type Transform = Pandoc -> Pandoc
 
