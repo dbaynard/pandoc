@@ -7,6 +7,7 @@
 {-# LANGUAGE PartialTypeSignatures #-}
 {-# LANGUAGE DataKinds           #-}
 {-# LANGUAGE KindSignatures      #-}
+{-# LANGUAGE TypeFamilies        #-}
 {-
 Copyright (C) 2006-2017 John MacFarlane <jgm@berkeley.edu>
 
@@ -190,7 +191,7 @@ data Conversion
 convertWithOpts :: Opt -> IO ()
 convertWithOpts opts = do
     da <- prepIO opts
-    runIO' da $ writeDoc da defaultAPIOpts opts
+    runio (runIO' da) $ writeDoc da defaultAPIOpts opts
 
 -- | Some options can be passed to the conversion using the pandoc API.
 -- One example would be a filter function written in haskell.
@@ -218,6 +219,8 @@ convertWithOpts' da apiopts opts = do
     doc <- getDoc da2 apiopts opts
     pure (da2, doc)
 
+newtype RunIO = RunIO (runio :: forall a . PandocIO a -> IO a)
+
 data DocArgs (prepare :: Conversion) = DocArgs
     { addContentsAsVariable :: String -> FilePath -> [(String, String)] -> PandocIO [(String, String)]
     , addStringAsVariable :: String -> FilePath -> [(String, String)] -> PandocIO [(String, String)]
@@ -235,7 +238,7 @@ data DocArgs (prepare :: Conversion) = DocArgs
     , reader :: Reader PandocIO
     , readerExts :: Extensions
     , readerName :: String
-    , runIO' :: forall a . PandocIO a -> IO a
+    , runIO' :: RunIO
     , sourceToDoc :: [FilePath] -> PandocIO Pandoc
     , sourceURL :: Maybe String
     , sources :: [FilePath]
@@ -396,7 +399,7 @@ prepIO opts = do
       readSources srcs = convertTabs . T.intercalate (T.pack "\n") <$>
                             mapM readSource srcs
 
-  let runIO' f = do
+  let runIO' = RunIO $ \f -> do
         (res, reports) <- runIOorExplode $ do
                              setTrace (optTrace opts)
                              setVerbosity verbosity
