@@ -39,6 +39,7 @@ Does a pandoc conversion based on command-line options.
 module Text.Pandoc.App (
             convertWithOpts
           , convertWithOpts'
+          , toAST
           , APIOpt(..)
           , defaultAPIOpts
           , Opt(..)
@@ -187,9 +188,17 @@ data Conversion
     | PrepareDoc
 
 convertWithOpts :: Opt -> IO ()
-convertWithOpts opts = do
+convertWithOpts = convertWithOpts' defaultAPIOpts
+
+convertWithOpts' :: APIOpt -> Opt -> IO ()
+convertWithOpts' apiopts opts = do
     da <- prepIO opts
-    runio (runIO' da) $ writeDoc da defaultAPIOpts opts
+    runio (runIO' da) $ writeDoc da apiopts opts
+
+toAST :: APIOpt -> Opt -> IO Pandoc
+toAST apiopts opts = do
+    da <- prepIO opts
+    runio (runIO' da) $ snd <$> prepareDoc da apiopts opts
 
 -- | Some options can be passed to the conversion using the pandoc API.
 -- One example would be a filter function written in haskell.
@@ -208,11 +217,11 @@ instance Show APIOpt where
 
 writeDoc :: DocArgs 'PrepareIO -> APIOpt -> Opt -> PandocIO ()
 writeDoc da apiopts opts = do
-    (da2, doc) <- convertWithOpts' da apiopts opts
+    (da2, doc) <- prepareDoc da apiopts opts
     putDoc da2 opts doc
 
-convertWithOpts' :: DocArgs 'PrepareIO -> APIOpt -> Opt -> PandocIO (DocArgs 'PrepareDoc, Pandoc)
-convertWithOpts' da apiopts opts = do
+prepareDoc :: DocArgs 'PrepareIO -> APIOpt -> Opt -> PandocIO (DocArgs 'PrepareDoc, Pandoc)
+prepareDoc da apiopts opts = do
     da2 <- prepDoc da opts
     doc <- getDoc da2 apiopts opts
     pure (da2, doc)
