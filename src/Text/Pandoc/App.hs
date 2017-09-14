@@ -33,6 +33,9 @@ Does a pandoc conversion based on command-line options.
 -}
 module Text.Pandoc.App (
             convertWithOpts
+          , convertWithOpts'
+          , APIOpt(..)
+          , defaultAPIOpts
           , Opt(..)
           , defaultOpts
           , parseOptions
@@ -176,7 +179,25 @@ pdfWriterAndProg mWriter mEngine = do
 
 
 convertWithOpts :: Opt -> IO ()
-convertWithOpts opts = do
+convertWithOpts = convertWithOpts' defaultAPIOpts
+
+-- | Some options can be passed to the conversion using the pandoc API.
+-- One example would be a filter function written in haskell.
+data APIOpt= APIOpt
+    { apiFilterFunction :: (Pandoc -> IO Pandoc) -- ^ Haskell filter action, NOT a command line option
+    }
+    deriving (Generic)
+
+defaultAPIOpts :: APIOpt
+defaultAPIOpts = APIOpt
+    { apiFilterFunction = pure
+    }
+
+instance Show APIOpt where
+    show = const "API Opts"
+
+convertWithOpts' :: APIOpt -> Opt -> IO ()
+convertWithOpts' apiopts opts = do
   let args = optInputFiles opts
   let outputFile = fromMaybe "-" (optOutputFile opts)
   let filters = optFilters opts
@@ -521,7 +542,7 @@ convertWithOpts opts = do
               >=> return . flip (foldr addMetadata) metadata
               >=> applyTransforms transforms
               >=> applyLuaFilters datadir (optLuaFilters opts) [format]
-              >=> applyFilters datadir filters' [format]
+              >=> applyFilters datadir (apiFilterFunction apiopts) filters' [format]
               )
     media <- getMediaBag
 
@@ -862,10 +883,12 @@ applyLuaFilters mbDatadir filters args d = do
   foldrM ($) d $ map go expandedFilters
 
 applyFilters :: MonadIO m
-             => Maybe FilePath -> [FilePath] -> [String] -> Pandoc -> m Pandoc
-applyFilters mbDatadir filters args d = do
+             => Maybe FilePath -> (Pandoc -> IO Pandoc) -> [FilePath] -> [String]
+             -> Pandoc -> m Pandoc
+applyFilters mbDatadir f filters args d = do
   expandedFilters <- mapM (expandFilterPath mbDatadir) filters
-  foldrM ($) d $ map (flip externalFilter args) expandedFilters
+  d' <- liftIO . f $ d
+  foldrM ($) d' $ map (flip externalFilter args) expandedFilters
 
 readSource :: FilePath -> PandocIO Text
 readSource "-" = liftIO (UTF8.toText <$> BS.getContents)
