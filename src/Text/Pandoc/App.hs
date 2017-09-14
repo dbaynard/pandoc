@@ -5,6 +5,8 @@
 {-# LANGUAGE RecordWildCards     #-}
 {-# LANGUAGE RankNTypes          #-}
 {-# LANGUAGE PartialTypeSignatures #-}
+{-# LANGUAGE DataKinds           #-}
+{-# LANGUAGE KindSignatures      #-}
 {-
 Copyright (C) 2006-2017 John MacFarlane <jgm@berkeley.edu>
 
@@ -180,6 +182,10 @@ pdfWriterAndProg mWriter mEngine = do
         | format `elem` ["html", "html5"] = Right defaultHtmlEngine
         | otherwise = Left $ "cannot produce pdf output with output format " ++ format
 
+data Conversion
+    = Unprepared
+    | PrepareIO
+    | PrepareDoc
 
 convertWithOpts :: Opt -> IO ()
 convertWithOpts opts = do
@@ -201,17 +207,18 @@ defaultAPIOpts = APIOpt
 instance Show APIOpt where
     show = const "API Opts"
 
-writeDoc :: DocArgs -> APIOpt -> Opt -> PandocIO ()
+writeDoc :: DocArgs 'PrepareIO -> APIOpt -> Opt -> PandocIO ()
 writeDoc da apiopts opts = do
-    doc <- convertWithOpts' da apiopts opts
-    putDoc da opts doc
+    (da2, doc) <- convertWithOpts' da apiopts opts
+    putDoc da2 opts doc
 
-convertWithOpts' :: DocArgs -> APIOpt -> Opt -> PandocIO Pandoc
+convertWithOpts' :: DocArgs 'PrepareIO -> APIOpt -> Opt -> PandocIO (DocArgs 'PrepareDoc, Pandoc)
 convertWithOpts' da apiopts opts = do
     da2 <- prepDoc da opts
-    getDoc da2 apiopts opts
+    doc <- getDoc da2 apiopts opts
+    pure (da2, doc)
 
-data DocArgs = DocArgs
+data DocArgs (prepare :: Conversion) = DocArgs
     { addContentsAsVariable :: String -> FilePath -> [(String, String)] -> PandocIO [(String, String)]
     , addStringAsVariable :: String -> FilePath -> [(String, String)] -> PandocIO [(String, String)]
     , datadir :: Maybe FilePath
@@ -244,7 +251,7 @@ data DocArgs = DocArgs
     , writerOptions :: WriterOptions
     }
 
-prepIO :: Opt -> IO DocArgs
+prepIO :: Opt -> IO (DocArgs 'PrepareIO)
 prepIO opts = do
   let args = optInputFiles opts
   let outputFile = fromMaybe "-" (optOutputFile opts)
@@ -420,7 +427,7 @@ prepIO opts = do
              return $ (varname, s) : vars
   pure DocArgs{..}
 
-prepDoc :: DocArgs -> Opt -> PandocIO DocArgs
+prepDoc :: DocArgs 'PrepareIO -> Opt -> PandocIO (DocArgs 'PrepareDoc)
 prepDoc DocArgs{..} opts = do
     setUserDataDir datadir
 
@@ -583,7 +590,7 @@ prepDoc DocArgs{..} opts = do
     setResourcePath (optResourcePath opts)
     pure DocArgs{..}
 
-getDoc :: DocArgs -> APIOpt -> Opt -> PandocIO Pandoc
+getDoc :: DocArgs 'PrepareDoc -> APIOpt -> Opt -> PandocIO Pandoc
 getDoc DocArgs{..} apiopts opts = sourceToDoc sources >>=
     (   (if isJust (optExtractMedia opts)
           then fillMediaBag (writerSourceURL writerOptions)
@@ -595,7 +602,7 @@ getDoc DocArgs{..} apiopts opts = sourceToDoc sources >>=
     >=> applyFilters datadir (apiFilterFunction apiopts) filters' [format]
     )
 
-putDoc :: DocArgs -> Opt -> Pandoc -> PandocIO ()
+putDoc :: DocArgs 'PrepareDoc -> Opt -> Pandoc -> PandocIO ()
 putDoc DocArgs{..} opts doc = do
     media <- getMediaBag
     case writer of
