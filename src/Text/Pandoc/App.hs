@@ -2,6 +2,9 @@
 {-# LANGUAGE DeriveGeneric       #-}
 {-# LANGUAGE ScopedTypeVariables #-}
 {-# LANGUAGE TupleSections       #-}
+{-# LANGUAGE RecordWildCards     #-}
+{-# LANGUAGE RankNTypes          #-}
+{-# LANGUAGE PartialTypeSignatures #-}
 {-
 Copyright (C) 2006-2017 John MacFarlane <jgm@berkeley.edu>
 
@@ -64,7 +67,7 @@ import qualified Data.Yaml as Yaml
 import GHC.Generics
 import Network.URI (URI (..), parseURI)
 import Paths_pandoc (getDataDir)
-import Skylighting (Style, Syntax (..), defaultSyntaxMap, parseTheme)
+import Skylighting (Style, Syntax (..), defaultSyntaxMap, parseTheme, SyntaxMap)
 import Skylighting.Parser (addSyntaxDefinition, missingIncludes,
                            parseSyntaxDefinition)
 import System.Console.GetOpt
@@ -179,7 +182,7 @@ pdfWriterAndProg mWriter mEngine = do
 
 
 convertWithOpts :: Opt -> IO ()
-convertWithOpts = void . convertWithOpts' defaultAPIOpts
+convertWithOpts = convertWithOpts' defaultAPIOpts
 
 -- | Some options can be passed to the conversion using the pandoc API.
 -- One example would be a filter function written in haskell.
@@ -196,8 +199,49 @@ defaultAPIOpts = APIOpt
 instance Show APIOpt where
     show = const "API Opts"
 
-convertWithOpts' :: APIOpt -> Opt -> IO Pandoc
+convertWithOpts' :: APIOpt -> Opt -> IO ()
 convertWithOpts' apiopts opts = do
+    da1 <- prepIO opts
+    runIO' da1 $ do
+        da2 <- prepDoc da1 opts
+        doc <- getDoc da2 apiopts opts
+        putDoc da2 opts doc
+
+data DocArgs = DocArgs
+    { addContentsAsVariable :: String -> FilePath -> [(String, String)] -> PandocIO [(String, String)]
+    , addStringAsVariable :: String -> FilePath -> [(String, String)] -> PandocIO [(String, String)]
+    , datadir :: Maybe FilePath
+    , eol :: IO.Newline
+    , epubMetadata :: Maybe String
+    , filters' :: [FilePath]
+    , format :: String
+    , highlightStyle :: Maybe Style
+    , mathMethod :: HTMLMathMethod
+    , maybePdfProg :: Maybe String
+    , metadata :: [(String, String)]
+    , outputFile :: FilePath
+    , readSources :: [FilePath] -> PandocIO Text
+    , reader :: Reader PandocIO
+    , readerExts :: Extensions
+    , readerName :: String
+    , runIO' :: forall a . PandocIO a -> IO a
+    , sourceToDoc :: [FilePath] -> PandocIO Pandoc
+    , sourceURL :: Maybe String
+    , sources :: [FilePath]
+    , standalone :: Bool
+    , syntaxMap :: SyntaxMap
+    , transforms :: [Transform]
+    , verbosity :: Verbosity
+    , withList :: forall m . PandocMonad m => (FilePath -> [(String, String)] -> m [(String, String)])
+          -> [FilePath] -> [(String, String)] -> m [(String, String)]
+    , writer :: Writer PandocIO
+    , writerExts :: Extensions
+    , writerName :: String
+    , writerOptions :: WriterOptions
+    }
+
+prepIO :: Opt -> IO DocArgs
+prepIO opts = do
   let args = optInputFiles opts
   let outputFile = fromMaybe "-" (optOutputFile opts)
   let filters = optFilters opts
@@ -338,12 +382,10 @@ convertWithOpts' apiopts opts = do
                                   then 0
                                   else optTabStop opts)
 
-      readSources :: [FilePath] -> PandocIO Text
       readSources srcs = convertTabs . T.intercalate (T.pack "\n") <$>
                             mapM readSource srcs
 
-  let runIO' :: PandocIO a -> IO a
-      runIO' f = do
+  let runIO' f = do
         (res, reports) <- runIOorExplode $ do
                              setTrace (optTrace opts)
                              setVerbosity verbosity
@@ -372,8 +414,10 @@ convertWithOpts' apiopts opts = do
   let addContentsAsVariable varname fp vars = do
              s <- UTF8.toString <$> readFileStrict fp
              return $ (varname, s) : vars
+  pure DocArgs{..}
 
-  runIO' $ do
+prepDoc :: DocArgs -> Opt -> PandocIO DocArgs
+prepDoc DocArgs{..} opts = do
     setUserDataDir datadir
 
     variables <-
@@ -518,8 +562,7 @@ convertWithOpts' apiopts opts = do
                          else id)
                      []
 
-    let sourceToDoc :: [FilePath] -> PandocIO Pandoc
-        sourceToDoc sources' =
+    let sourceToDoc sources' =
            case reader of
                 TextReader r
                   | optFileScope opts || readerName == "json" ->
@@ -534,18 +577,23 @@ convertWithOpts' apiopts opts = do
           writerName == "markdown_github") $
       report $ Deprecated "markdown_github" "Use gfm instead."
     setResourcePath (optResourcePath opts)
-    doc <- sourceToDoc sources >>=
-              (   (if isJust (optExtractMedia opts)
-                      then fillMediaBag (writerSourceURL writerOptions)
-                      else return)
-              >=> maybe return extractMedia (optExtractMedia opts)
-              >=> return . flip (foldr addMetadata) metadata
-              >=> applyTransforms transforms
-              >=> applyLuaFilters datadir (optLuaFilters opts) [format]
-              >=> applyFilters datadir (apiFilterFunction apiopts) filters' [format]
-              )
-    media <- getMediaBag
+    pure DocArgs{..}
 
+getDoc :: DocArgs -> APIOpt -> Opt -> PandocIO Pandoc
+getDoc DocArgs{..} apiopts opts = sourceToDoc sources >>=
+    (   (if isJust (optExtractMedia opts)
+          then fillMediaBag (writerSourceURL writerOptions)
+          else return)
+    >=> maybe return extractMedia (optExtractMedia opts)
+    >=> return . flip (foldr addMetadata) metadata
+    >=> applyTransforms transforms
+    >=> applyLuaFilters datadir (optLuaFilters opts) [format]
+    >=> applyFilters datadir (apiFilterFunction apiopts) filters' [format]
+    )
+
+putDoc :: DocArgs -> Opt -> Pandoc -> PandocIO ()
+putDoc DocArgs{..} opts doc = do
+    media <- getMediaBag
     case writer of
       ByteStringWriter f -> f writerOptions doc >>= writeFnBinary outputFile
       TextWriter f -> case maybePdfProg of
@@ -575,7 +623,6 @@ convertWithOpts' apiopts opts = do
                      then T.pack <$> makeSelfContained writerOptions
                           (T.unpack output)
                      else return output
-    pure doc
 
 type Transform = Pandoc -> Pandoc
 
