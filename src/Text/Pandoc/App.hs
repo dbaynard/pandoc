@@ -6,7 +6,6 @@
 {-# LANGUAGE RankNTypes          #-}
 {-# LANGUAGE PartialTypeSignatures #-}
 {-# LANGUAGE DataKinds           #-}
-{-# LANGUAGE KindSignatures      #-}
 {-# LANGUAGE TypeFamilies        #-}
 {-
 Copyright (C) 2006-2017 John MacFarlane <jgm@berkeley.edu>
@@ -184,8 +183,7 @@ pdfWriterAndProg mWriter mEngine = do
         | otherwise = Left $ "cannot produce pdf output with output format " ++ format
 
 data Conversion
-    = Unprepared
-    | PrepareIO
+    = PrepareIO
     | PrepareDoc
 
 convertWithOpts :: Opt -> IO ()
@@ -219,7 +217,23 @@ convertWithOpts' da apiopts opts = do
     doc <- getDoc da2 apiopts opts
     pure (da2, doc)
 
-newtype RunIO = RunIO (runio :: forall a . PandocIO a -> IO a)
+newtype RunIO = RunIO {runio :: forall a . PandocIO a -> IO a}
+
+type family Metadata (t :: Conversion) where
+    Metadata 'PrepareDoc = [(String, String)]
+    Metadata _ = ()
+
+type family SourceToDoc (t :: Conversion) where
+    SourceToDoc 'PrepareDoc = [FilePath] -> PandocIO Pandoc
+    SourceToDoc _ = ()
+
+type family Transforms (t :: Conversion) where
+    Transforms 'PrepareDoc = [Transform]
+    Transforms _ = ()
+
+type family WriterOptions' (t :: Conversion) where
+    WriterOptions' 'PrepareDoc = WriterOptions
+    WriterOptions' _ = ()
 
 data DocArgs (prepare :: Conversion) = DocArgs
     { addContentsAsVariable :: String -> FilePath -> [(String, String)] -> PandocIO [(String, String)]
@@ -232,26 +246,26 @@ data DocArgs (prepare :: Conversion) = DocArgs
     , highlightStyle :: Maybe Style
     , mathMethod :: HTMLMathMethod
     , maybePdfProg :: Maybe String
-    , metadata :: [(String, String)]
     , outputFile :: FilePath
     , readSources :: [FilePath] -> PandocIO Text
     , reader :: Reader PandocIO
     , readerExts :: Extensions
     , readerName :: String
     , runIO' :: RunIO
-    , sourceToDoc :: [FilePath] -> PandocIO Pandoc
     , sourceURL :: Maybe String
     , sources :: [FilePath]
     , standalone :: Bool
     , syntaxMap :: SyntaxMap
-    , transforms :: [Transform]
-    , verbosity :: Verbosity
     , withList :: forall m . PandocMonad m => (FilePath -> [(String, String)] -> m [(String, String)])
           -> [FilePath] -> [(String, String)] -> m [(String, String)]
     , writer :: Writer PandocIO
     , writerExts :: Extensions
     , writerName :: String
-    , writerOptions :: WriterOptions
+    , verbosity :: Verbosity
+    , metadata :: Metadata prepare
+    , sourceToDoc :: SourceToDoc prepare
+    , transforms :: Transforms prepare
+    , writerOptions :: WriterOptions' prepare
     }
 
 prepIO :: Opt -> IO (DocArgs 'PrepareIO)
@@ -260,6 +274,10 @@ prepIO opts = do
   let outputFile = fromMaybe "-" (optOutputFile opts)
   let filters = optFilters opts
   let verbosity = optVerbosity opts
+  let metadata = ()
+  let sourceToDoc = ()
+  let transforms = ()
+  let writerOptions = ()
 
   when (optDumpArgs opts) $
     do UTF8.hPutStrLn stdout outputFile
