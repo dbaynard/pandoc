@@ -6,13 +6,5 @@ flags:
     network-uri: true
 packages:
 - '.'
-extra-deps:
-- texmath-0.9.4.2
-- hslua-0.8.0
-- skylighting-0.3.4.1
-- cmark-gfm-0.1.1
-- QuickCheck-2.10.0.1
-- tasty-quickcheck-0.9.1
-- haddock-library-1.4.3
-- pandoc-types-1.17.1
-resolver: lts-9.1
+extra-deps: []
+resolver: https://gist.github.com/dbaynard/9693107a883a6282f52f22785d0072e2/raw/eeb1f7a905e06bb22c641f30923a91f96bc4ead6
