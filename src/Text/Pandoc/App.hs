@@ -182,7 +182,9 @@ pdfWriterAndProg mWriter mEngine = do
 
 
 convertWithOpts :: Opt -> IO ()
-convertWithOpts = convertWithOpts' defaultAPIOpts
+convertWithOpts opts = do
+    da <- prepIO opts
+    runIO' da $ writeDoc da defaultAPIOpts opts
 
 -- | Some options can be passed to the conversion using the pandoc API.
 -- One example would be a filter function written in haskell.
@@ -199,13 +201,15 @@ defaultAPIOpts = APIOpt
 instance Show APIOpt where
     show = const "API Opts"
 
-convertWithOpts' :: APIOpt -> Opt -> IO ()
-convertWithOpts' apiopts opts = do
-    da1 <- prepIO opts
-    runIO' da1 $ do
-        da2 <- prepDoc da1 opts
-        doc <- getDoc da2 apiopts opts
-        putDoc da2 opts doc
+writeDoc :: DocArgs -> APIOpt -> Opt -> PandocIO ()
+writeDoc da apiopts opts = do
+    doc <- convertWithOpts' da apiopts opts
+    putDoc da opts doc
+
+convertWithOpts' :: DocArgs -> APIOpt -> Opt -> PandocIO Pandoc
+convertWithOpts' da apiopts opts = do
+    da2 <- prepDoc da opts
+    getDoc da2 apiopts opts
 
 data DocArgs = DocArgs
     { addContentsAsVariable :: String -> FilePath -> [(String, String)] -> PandocIO [(String, String)]
